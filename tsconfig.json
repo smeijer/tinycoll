@@ -6,7 +6,6 @@
     "lib": ["ES2022", "DOM"],
     "strict": true,
     "declaration": true,
-    "emitDeclarationOnly": true,
     "noEmit": false,
     "outDir": "dist",
     "allowJs": false,
@@ -14,7 +13,8 @@
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true
   },
   "include": ["./**/*.ts"],
   "exclude": ["dist", "node_modules", "**/*.test.ts"]

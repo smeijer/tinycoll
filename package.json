@@ -1,11 +1,14 @@
 {
-  "name": "tiny-mongo-store",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "tinycoll",
+  "version": "0.0.1",
+  "main": "./dist/commonjs/index.js",
   "type": "module",
   "scripts": {
     "_test": "borp 'test/**.test.ts'",
-    "test": "globstar -- node --watch --import tsx --test-only \"test/**.test.ts\""
+    "test": "globstar -- node --watch --import tsx --test \"test/**.test.ts\"",
+    "test:only": "globstar -- node --watch --import tsx --test-only \"test/**.test.ts\"",
+    "build": "tshy",
+    "dev": "tshy --watch"
   },
   "author": "Stephan Meijer",
   "license": "ISC",
@@ -18,7 +21,51 @@
     "@types/node": "^22.14.0",
     "borp": "^0.19.0",
     "globstar": "^1.0.0",
+    "tshy": "^3.0.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
-  }
+  },
+  "tshy": {
+    "exports": {
+      "./package.json": "./package.json",
+      "./file-storage": "./src/file-storage.ts",
+      "./indexeddb-storage": "./src/indexeddb-storage.ts",
+      ".": "./src/index.ts"
+    }
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./file-storage": {
+      "import": {
+        "types": "./dist/esm/file-storage.d.ts",
+        "default": "./dist/esm/file-storage.js"
+      },
+      "require": {
+        "types": "./dist/commonjs/file-storage.d.ts",
+        "default": "./dist/commonjs/file-storage.js"
+      }
+    },
+    "./indexeddb-storage": {
+      "import": {
+        "types": "./dist/esm/indexeddb-storage.d.ts",
+        "default": "./dist/esm/indexeddb-storage.js"
+      },
+      "require": {
+        "types": "./dist/commonjs/indexeddb-storage.d.ts",
+        "default": "./dist/commonjs/indexeddb-storage.js"
+      }
+    },
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/commonjs/index.d.ts",
+        "default": "./dist/commonjs/index.js"
+      }
+    }
+  },
+  "types": "./dist/commonjs/index.d.ts",
+  "module": "./dist/esm/index.js"
 }

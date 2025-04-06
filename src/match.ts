@@ -1,19 +1,34 @@
-type Query = Record<string, any>;
-type Op =
-  | '$eq'
-  | '$ne'
-  | '$gt'
-  | '$gte'
-  | '$lt'
-  | '$lte'
-  | '$in'
-  | '$nin'
-  | '$exists'
-  | '$regex'
-  | '$size'
-  | '$and'
-  | '$or'
-  | '$not';
+export type Query<T> = RootLogical<T> & {
+  [K in keyof T]?: FieldQuery<T[K]>;
+};
+
+type RootLogical<T> = {
+  $and?: Query<T>[];
+  $or?: Query<T>[];
+  $not?: Query<T>;
+};
+
+type FieldOps<T> = {
+  $eq?: T;
+  $ne?: T;
+  $gt?: T;
+  $gte?: T;
+  $lt?: T;
+  $lte?: T;
+  $exists?: boolean;
+  $regex?: string;
+  $size?: number;
+};
+
+type ArrayOps<T> = {
+  $in?: T[];
+  $nin?: T[];
+};
+
+type FieldQuery<T> = T | (FieldOps<T> & ArrayOps<T>);
+
+export type Op = '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$nin' | '$and' | '$or' | '$not' | '$exists' | '$regex' | '$size';
+
 
 function getValue(obj: any, path: string) {
   return path.split('.').reduce((o, k) => o?.[k], obj);
@@ -52,7 +67,7 @@ function matchField(val: any, cond: any): boolean {
   });
 }
 
-export function matches(doc: any, query: Query): boolean {
+export function matches<TDoc>(doc: TDoc, query: Query<TDoc>): boolean {
   return Object.entries(query).every(([key, cond]) => {
     switch (key) {
       case '$or':
@@ -60,7 +75,7 @@ export function matches(doc: any, query: Query): boolean {
       case '$and':
         return Array.isArray(cond) && cond.every((q) => matches(doc, q));
       case '$not':
-        return !matches(doc, cond);
+        return !matches(doc, cond as Query<TDoc>);
       default: {
         const val = getValue(doc, key);
         return matchField(val, cond);

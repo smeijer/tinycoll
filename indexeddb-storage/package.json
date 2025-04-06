@@ -1,0 +1,4 @@
+{
+  "main": "../dist/commonjs/indexeddb-storage.js",
+  "types": "../dist/commonjs/indexeddb-storage.d.ts"
+}

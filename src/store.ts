@@ -1,15 +1,23 @@
-import { signal, effect, Signal } from '@preact/signals-core';
-import { matches } from './match';
-import { uuid } from './utils';
+import { signal, effect } from '@preact/signals-core';
+import { matches, Query } from './match.js';
+import { newShortId } from './utils.js';
+import { StorageAdapter } from './storage.js';
+import { PromiseQueue } from './promise-queue';
+import { applyModifier, Modifier } from './modifier';
 
-export type Document = {
-  _id?: string;
-} & Record<string, any>;
+type Projected<TDoc, TPrj> = keyof TPrj extends never ? TDoc : Pick<TDoc, Extract<keyof TPrj, keyof TDoc>>;
+type Projection<TDoc> = Partial<Record<keyof TDoc, 1>>;
 
-export type StorageAdapter = {
-  get: (key: string) => Promise<any>;
-  set: (key: string, val: any) => Promise<void>;
-};
+type WithId<T = {}> = T & { id: string };
+type WithoutId<T = {}> = Omit<T, 'id'>;
+type WithOptionalId<T = {}> = WithoutId<T> & { id?: string };
+
+export type Document = WithId<Record<string, any>>
+
+interface Observer {
+  id: string;
+  stop: () => void;
+}
 
 interface UpdateResult<T> {
   matchedCount: number;
@@ -18,11 +26,15 @@ interface UpdateResult<T> {
   upsertedId: string | null;
 }
 
-interface FindOptions {
-  projection?: Record<string, 1>;
+interface FindOptions<TDoc extends Document, TPrj = Projection<TDoc>> {
+  projection?: TPrj;
   sort?: Record<string, 1 | -1>;
   skip?: number;
   limit?: number;
+}
+
+interface UpdateOptions {
+  upsert?: boolean;
 }
 
 interface TtlIndex {
@@ -30,30 +42,79 @@ interface TtlIndex {
   expireAfterSeconds: number;
 }
 
-interface UpdateOptions {
-  upsert?: boolean;
+interface Change<T> {
+  type: 'added' | 'removed' | 'changed';
+  doc: T;
 }
 
-type Change<T> = { type: 'added' | 'removed' | 'changed'; doc: T };
+class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
+  #result = signal<Array<TDoc>>([]);
+  #hasRun = false;
+  #changeHandlers = new Set<(change: Change<TDoc>) => void>();
+  #isNotifying = false;
+  #pendingChange = false;
 
-class ReactiveCursor<T> {
-  private result = signal<Array<T>>([]);
-  private hasRun = false;
-  private changeHandlers = new Set<(change: Change<T>) => void>();
+  readonly #queryFn: () => Array<TDoc>;
+  readonly #options: FindOptions<TDoc>;
 
   constructor(
-    private queryFn: () => Array<T>,
-    private options: FindOptions = {}
-  ) {}
+    queryFn: () => Array<TDoc>,
+    options: FindOptions<TDoc> = {}
+  ) {
+    this.#queryFn = queryFn;
+    this.#options = options;
+  }
 
-  private ensureRun() {
-    if (this.hasRun) return;
-    this.hasRun = true;
+  #clone(opts: Partial<FindOptions<TDoc>>): ReactiveCursor<TDoc, TOut> {
+    return new ReactiveCursor(this.#queryFn, { ...this.#options, ...opts });
+  }
 
-    let prev = new Map<string, T>();
+  sort(sort: Record<string, 1 | -1>): ReactiveCursor<TDoc, TOut> {
+    return this.#clone({ sort });
+  }
+
+  limit(limit: number): ReactiveCursor<TDoc, TOut> {
+    return this.#clone({ limit });
+  }
+
+  skip(skip: number): ReactiveCursor<TDoc, TOut> {
+    return this.#clone({ skip });
+  }
+
+  project<
+    TProjection = Projection<TDoc>,
+    TOut = ReactiveCursor<TDoc, Projected<TDoc, TProjection>>
+  >(projection: TProjection): TOut {
+    return this.#clone({ projection: projection as any }) as TOut;
+  }
+
+  paginate(page: number, perPage: number): ReactiveCursor<TDoc, TOut> {
+    const skip = (page - 1) * perPage;
+    return this.skip(skip).limit(perPage);
+  }
+
+   #ensureRun() {
+    if (this.#hasRun) return;
+    this.#hasRun = true;
+
+    let prev = new Map<string, TDoc>();
 
     effect(() => {
-      const next = new Map(this.queryFn().map((doc: any) => [doc._id, doc]));
+      let docs: TOut[] | TDoc[] = this.#queryFn();
+
+      if (this.#options.sort) docs = sortDocs(docs, this.#options.sort);
+      if (this.#options.skip || this.#options.limit !== undefined) {
+        docs = docs.slice(
+          this.#options.skip || 0,
+          (this.#options.skip || 0) + (this.#options.limit ?? docs.length)
+        );
+      }
+
+      if (this.#options.projection) {
+        docs = docs.map((doc) => project(doc, this.#options.projection!)) as unknown as TOut[];
+      }
+
+      const next = new Map(docs.map((doc: any) => [doc.id, doc]));
 
       const added = [...next.entries()].filter(([k]) => !prev.has(k));
       const removed = [...prev.entries()].filter(([k]) => !next.has(k));
@@ -61,51 +122,103 @@ class ReactiveCursor<T> {
         ([k, v]) => prev.has(k) && prev.get(k) !== v
       );
 
-      for (const [_, doc] of added) this.emit({ type: 'added', doc });
-      for (const [_, doc] of removed) this.emit({ type: 'removed', doc });
-      for (const [_, doc] of changed) this.emit({ type: 'changed', doc });
+      for (const [_, doc] of added) this.#emit({ type: 'added', doc });
+      for (const [_, doc] of removed) this.#emit({ type: 'removed', doc });
+      for (const [_, doc] of changed) this.#emit({ type: 'changed', doc });
 
-      this.result.value = Array.from(next.values());
+      this.#result.value = Array.from(next.values());
       prev = next;
     });
   }
 
-  private emit(change: Change<T>) {
-    for (const fn of this.changeHandlers) fn(change);
+   #emit(change: Change<TDoc>) {
+    if (this.#isNotifying) {
+      this.#pendingChange = true;
+      return;
+    }
+
+    this.#isNotifying = true;
+
+    queueMicrotask(() => {
+      this.#isNotifying = false;
+      for (const fn of this.#changeHandlers) {
+        fn(change);
+      }
+
+      if (this.#pendingChange) {
+        this.#pendingChange = false;
+        this.#emit(change);
+      }
+    });
   }
 
-  observe(fn: (change: Change<T>) => void): () => void {
-    this.ensureRun();
-    this.changeHandlers.add(fn);
-    return () => this.changeHandlers.delete(fn);
+  observe(fn: (change: Change<TDoc>) => void): Observer {
+    this.#ensureRun();
+    const wrapped = Object.assign(fn, { __id: newShortId() });
+    this.#changeHandlers.add(wrapped);
+
+    return {
+      id: wrapped.__id,
+      stop: () => this.#changeHandlers.delete(wrapped),
+    };
   }
 
-  toArray(): Array<T> {
-    this.ensureRun();
-    return this.result.value;
+  watch(callback: (results: TOut[]) => void, options: { immediate?: boolean } = {}): Observer {
+    let last: TOut[] = [];
+    let scheduled = false;
+
+    const run = () => {
+      scheduled = false;
+      const next = this.toArray();
+      if (
+        next.length !== last.length ||
+        next.some((v, i) => v !== last[i])
+      ) {
+        last = next;
+        callback(next);
+      }
+    };
+
+    const observer = this.observe(() => {
+      if (!scheduled) {
+        scheduled = true;
+        queueMicrotask(run);
+      }
+    });
+
+    if (options.immediate !== false) {
+      queueMicrotask(run);
+    }
+
+    return observer;
   }
 
-  map<U>(fn: (doc: T) => U): Array<U> {
-    this.ensureRun();
-    return this.result.value.map(fn);
+  toArray(): Array<TOut> {
+    this.#ensureRun();
+    return this.#result.value as unknown as Array<TOut>;
   }
 
-  forEach(fn: (doc: T) => void): void {
-    this.ensureRun();
-    this.result.value.forEach(fn);
+  map<U>(fn: (doc: TDoc) => U): Array<U> {
+    this.#ensureRun();
+    return this.#result.value.map(fn);
+  }
+
+  forEach(fn: (doc: TDoc) => void): void {
+    this.#ensureRun();
+    this.#result.value.forEach(fn);
   }
 
   count(): number {
-    this.ensureRun();
-    return this.result.value.length;
+    this.#ensureRun();
+    return this.#result.value.length;
   }
 
-  first(): T | undefined {
-    this.options.limit = 1;
+  first(): TOut | undefined {
+    this.#options.limit = 1;
     return this.toArray()[0];
   }
 
-  last(): T | undefined {
+  last(): TOut | undefined {
     return this.toArray().at(-1);
   }
 
@@ -118,79 +231,9 @@ function getValue(obj: any, path: string): any {
   return path.split('.').reduce((o, k) => o?.[k], obj);
 }
 
-function setValue(obj: any, path: string, value: any): any {
-  const keys = path.split('.');
-  const last = keys.pop()!;
-  let updated = structuredClone(obj);
-  let target = updated;
-  for (const k of keys) {
-    target[k] = structuredClone(target[k] ?? {});
-    target = target[k];
-  }
-  target[last] = value;
-  return updated;
-}
-
-function unsetValue(obj: any, path: string): any {
-  const keys = path.split('.');
-  const last = keys.pop()!;
-  let updated = structuredClone(obj);
-  let parent = updated;
-  for (const k of keys) {
-    parent[k] = structuredClone(parent[k] ?? {});
-    parent = parent[k];
-  }
-  delete parent[last];
-  return updated;
-}
-
-function applyModifier(doc: Document, mod: any): Document {
-  let updated = doc;
-
-  if (mod.$set) {
-    for (const [k, v] of Object.entries(mod.$set)) {
-      const current = getValue(updated, k);
-      if (current !== v) updated = setValue(updated, k, v);
-    }
-  }
-
-  if (mod.$inc) {
-    for (const [k, v] of Object.entries<any>(mod.$inc)) {
-      const current = getValue(updated, k);
-      updated = setValue(updated, k, (typeof current === 'number' ? current : 0) + v);
-    }
-  }
-
-  if (mod.$unset) {
-    for (const k of Object.keys(mod.$unset)) {
-      if (getValue(updated, k) !== undefined) {
-        updated = unsetValue(updated, k);
-      }
-    }
-  }
-
-  if (mod.$push) {
-    for (const [k, v] of Object.entries(mod.$push)) {
-      const arr = getValue(updated, k);
-      updated = setValue(updated, k, Array.isArray(arr) ? [...arr, v] : [v]);
-    }
-  }
-
-  if (mod.$pull) {
-    for (const [k, v] of Object.entries(mod.$pull)) {
-      const arr = getValue(updated, k);
-      if (Array.isArray(arr)) {
-        updated = setValue(updated, k, arr.filter((item) => item !== v));
-      }
-    }
-  }
-
-  return updated;
-}
-
-function extractMatchingDocs(query: Record<string, any>, map: Map<string, Document>): Document[] {
-  if ('_id' in query && typeof query._id === 'string') {
-    const doc = map.get(query._id);
+function extractMatchingDocs<TDocument extends Document>(query: Query<TDocument>, map: Map<string, TDocument>): TDocument[] {
+  if ('id' in query && typeof query.id === 'string') {
+    const doc = map.get(query.id);
     return doc && matches(doc, query) ? [doc] : [];
   }
   return Array.from(map.values()).filter((doc) => matches(doc, query));
@@ -208,130 +251,238 @@ function sortDocs(docs: any[], sort: Record<string, 1 | -1>): any[] {
   });
 }
 
-function project(doc: any, projection: Record<string, 1>): any {
-  const out: any = {};
-  for (const key in projection) {
-    out[key] = getValue(doc, key);
+function project<TDoc, TPrj extends Projection<TDoc>>(
+  doc: TDoc,
+  projection: TPrj
+): Projected<TDoc, TPrj> {
+  const out: Partial<TDoc> = {};
+  for (const key of Object.keys(projection)) {
+    out[key as keyof TDoc] = getValue(doc, key);
   }
-  return out;
+
+  return out as Projected<TDoc, TPrj>;
 }
 
-export function createCollection(
-  name: string,
-  options?: {
-    storage?: StorageAdapter;
-    ttlIndexes?: TtlIndex[];
-  }
-) {
-  const dbKey = `coll::${name}`;
-  const docsMap = signal<Map<string, Document>>(new Map());
-  const storage = options?.storage;
-  const ttlIndexes = options?.ttlIndexes || [];
+function isValidName(name: string) {
+  return /^[a-z][a-z0-9_]*$/.test(name);
+}
 
-  if (storage) {
-    storage.get(dbKey).then((stored) => {
-      if (Array.isArray(stored)) {
-        docsMap.value = new Map(stored.map((doc) => [doc._id!, doc]));
+export class Collection<TDoc extends Document, TMeta extends WithoutId<Document> = {}> {
+  #dbKey: string;
+  #docs = signal<Map<string, TDoc>>(new Map());
+  #storage?: StorageAdapter;
+  #ttlIndexes: TtlIndex[] = [];
+  #isBatching = false;
+  #localClone = new Map<string, TDoc>();
+  #meta: Meta<WithId<TMeta>> | null = null;
+  #ready: Promise<void>;
+  #txQueue = new PromiseQueue();
+
+  get meta(): Meta<WithId<TMeta>> {
+    if (!this.#meta) throw new Error('Collection is not initialized');
+    return this.#meta;
+  }
+
+  constructor(name: string, options?: { storage?: StorageAdapter; ttlIndexes?: TtlIndex[]; ttlInterval?: number }) {
+    if (this.constructor !== Meta && !isValidName(name)) {
+      throw new Error(`Invalid collection name: ${name}`);
+    }
+
+    this.#dbKey = name;
+    this.#storage = options?.storage;
+    this.#ttlIndexes = options?.ttlIndexes || [];
+
+    if (name !== '_meta') {
+      this.#meta = new Meta(name, { storage: options?.storage });
+    }
+
+    let _resolve: () => void;
+    this.#ready = new Promise((resolve) => {
+      _resolve = resolve;
+    })
+
+    void this.#initStorage().finally(() => _resolve());
+
+    const ttlInterval = options?.ttlInterval ?? 60_000;
+    setInterval(() => {
+      const now = Date.now();
+      const updated = new Map(this.#docs.value);
+      let changed = false;
+      for (const [id, doc] of updated) {
+        for (const index of this.#ttlIndexes) {
+          const ts = getValue(doc, index.field);
+          if (typeof ts === 'number' && now >= ts + index.expireAfterSeconds * 1000) {
+            updated.delete(id);
+            changed = true;
+            break;
+          }
+        }
       }
+      if (changed) this.#docs.value = updated;
+    }, ttlInterval);
+  }
+
+  async #initStorage() {
+    if (!this.#storage) return;
+
+    const stored = await this.#storage.get(this.#dbKey);
+
+    if (Array.isArray(stored)) {
+      // need to spread, the signal won't catch this change otherwise
+      this.#docs.value = new Map(stored.map((doc) => [doc.id!, { ...doc }]));
+    }
+
+    effect(() => {
+      const docs = Array.from(this.#docs.value.values());
+      this.#storage?.set(this.#dbKey, docs);
     });
-
-    effect(() => void storage.set(dbKey, Array.from(docsMap.value.values())));
   }
 
-  setInterval(() => {
-    const now = Date.now();
-    const updated = new Map(docsMap.value);
-    let changed = false;
-    for (const [id, doc] of updated) {
-      for (const index of ttlIndexes) {
-        const ts = getValue(doc, index.field);
-        if (typeof ts === 'number' && now >= ts + index.expireAfterSeconds * 1000) {
-          updated.delete(id);
-          changed = true;
-          break;
-        }
+  onReady(callback: () => void) {
+    void this.#ready.then(callback);
+    const x = this.batch(async () => 24);
+  }
+
+  batch<Fn extends () => any>(fn: Fn): ReturnType<Fn> extends Promise<any> ? Promise<void> : void {
+    this.#isBatching = true;
+
+    try {
+      const result = fn();
+
+      if (result instanceof Promise) {
+        return result.then(() => {}).finally(() => {
+          this.#docs.value = this.#localClone;
+          this.#localClone = new Map();
+          this.#isBatching = false;
+        }) as any;
+      }
+
+      this.#docs.value = this.#localClone;
+      this.#localClone = new Map();
+      this.#isBatching = false;
+      return result;
+    } catch (err) {
+      this.#localClone = new Map();
+      this.#isBatching = false;
+      throw err;
+    }
+  }
+
+  insert(doc: WithOptionalId<TDoc>) {
+    const id = doc.id || newShortId();
+    const newDoc = { ...doc, id } as TDoc;
+    if (this.#isBatching) {
+      this.#localClone.set(id, newDoc);
+    } else {
+      this.#docs.value = new Map(this.#docs.value).set(id, newDoc);
+    }
+  }
+
+  update(
+    query: Query<TDoc>,
+    modifier: Modifier<TDoc>,
+    opts: UpdateOptions = {}
+  ): UpdateResult<TDoc> {
+    const updated = this.#isBatching ? this.#localClone : new Map(this.#docs.value);
+    const matchesList = extractMatchingDocs(query, updated);
+
+    let matchedCount = 0;
+    let modifiedCount = 0;
+
+    for (const doc of matchesList) {
+      matchedCount++;
+      const modified = applyModifier(doc, modifier);
+      if (modified !== doc) {
+        updated.set(modified.id!, modified);
+        modifiedCount++;
       }
     }
-    if (changed) docsMap.value = updated;
-  }, 60_000);
 
-  return {
-    insert(doc: Document) {
-      const _id = doc._id || uuid();
-      docsMap.value = new Map(docsMap.value).set(_id, { ...doc, _id });
-    },
-
-    update(
-      query: Record<string, any>,
-      modifier: any,
-      opts: UpdateOptions = {}
-    ): UpdateResult<Document> {
-      const updated = new Map(docsMap.value);
-      const matchesList = extractMatchingDocs(query, updated);
-
-      let matchedCount = 0;
-      let modifiedCount = 0;
-
-      for (const doc of matchesList) {
-        matchedCount++;
-        const modified = applyModifier(doc, modifier);
-        if (modified !== doc) {
-          updated.set(modified._id!, modified);
-          modifiedCount++;
-        }
-      }
-
-      let upsertedId: string | null = null;
-      if (matchedCount === 0 && opts.upsert) {
-        const base: Document = { ...query };
-        const applied = applyModifier(base, modifier);
-        if (!applied._id) applied._id = uuid();
-        updated.set(applied._id, applied);
-        upsertedId = applied._id;
-      }
-
-      docsMap.value = updated;
-
-      return {
-        matchedCount,
-        modifiedCount,
-        upsertedCount: upsertedId ? 1 : 0,
-        upsertedId,
-      };
-    },
-
-    remove(query: Record<string, any>) {
-      if (Object.keys(query).length === 0) {
-        docsMap.value = new Map();
-        return;
-      }
-
-      const updated = new Map(docsMap.value);
-      const targets = extractMatchingDocs(query, updated);
-      for (const doc of targets) {
-        updated.delete(doc._id!);
-      }
-      docsMap.value = updated;
-    },
-
-    find(query: Record<string, any> = {}, opts: FindOptions = {}) {
-      return new ReactiveCursor(() => {
-        let docs = extractMatchingDocs(query, docsMap.value);
-        if (opts.sort) docs = sortDocs(docs, opts.sort);
-        if (opts.skip || opts.limit !== undefined) {
-          docs = docs.slice(opts.skip || 0, (opts.skip || 0) + (opts.limit ?? docs.length));
-        }
-        if (opts.projection) docs = docs.map((doc) => project(doc, opts.projection!));
-        return docs;
-      }, opts);
-    },
-
-    findOne(query: Record<string, any>, opts: FindOptions = {}): Document | undefined {
-      return this.find(query, { ...opts, limit: 1 }).first();
-    },
-
-    count(query: Record<string, any> = {}) {
-      return this.find(query).count();
+    let upsertedId: string | null = null;
+    if (matchedCount === 0 && opts.upsert) {
+      const base: TDoc = { ...query } as TDoc;
+      const applied = applyModifier(base, modifier);
+      if (!applied.id) applied.id = newShortId();
+      updated.set(applied.id, applied);
+      upsertedId = applied.id;
     }
-  };
+
+    if (!this.#isBatching) {
+      this.#docs.value = updated;
+    }
+
+    return {
+      matchedCount,
+      modifiedCount,
+      upsertedCount: upsertedId ? 1 : 0,
+      upsertedId,
+    };
+  }
+
+  remove(query: Query<TDoc>) {
+    if (Object.keys(query).length === 0) {
+      this.#docs.value = new Map();
+      return;
+    }
+
+    const updated = this.#isBatching ? this.#localClone : new Map(this.#docs.value);
+    const targets = extractMatchingDocs(query, updated);
+    for (const doc of targets) {
+      updated.delete(doc.id!);
+    }
+
+    if (!this.#isBatching) {
+      this.#docs.value = updated;
+    }
+  }
+
+  async transaction(fn: () => Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.#txQueue.push(async () => {
+        const snapshot = new Map(this.#docs.value);
+        try {
+          await this.batch(fn);
+          resolve();
+        } catch (err) {
+          this.#docs.value = snapshot;
+          reject(err);
+        }
+      });
+    });
+  }
+
+  find<TPrj extends Projection<TDoc> = {}, TOut = Projected<TDoc, TPrj>>(
+    query: Query<TDoc> = {},
+    opts: FindOptions<TDoc, TPrj> = {}
+  ) {
+    return new ReactiveCursor<TDoc, TOut>(() => extractMatchingDocs(query, this.#docs.value), opts);
+  }
+
+  findOne<TPrj extends Projection<TDoc> = {}, TOut = Projected<TDoc, TPrj>>(
+    query: Query<TDoc>,
+    opts: FindOptions<TDoc, TPrj> = {}
+  ) {
+    return this.find<TPrj, TOut>(query, { ...opts, limit: 1 }).first();
+  }
+
+  count(query: Query<TDoc> = {}) {
+    return this.find(query).count();
+  }
+}
+
+class Meta<TMeta extends Document> extends Collection<WithId<TMeta>, {}> {
+  #name: string;
+
+  constructor(name: string, options: { storage?: StorageAdapter }) {
+    super('_meta', { storage: options.storage });
+    this.#name = name;
+  }
+
+  get<K extends keyof TMeta>(key: K): TMeta[K] | undefined {
+    return this.findOne({ id: this.#name })?.[key];
+  }
+
+  set<K extends keyof TMeta>(key: K, value: TMeta[K]): void {
+    this.update({ id: this.#name }, { $set: { [key]: value } as any }, { upsert: true });
+  }
 }
