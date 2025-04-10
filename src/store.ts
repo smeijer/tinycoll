@@ -401,7 +401,7 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
     let upsertedId: string | null = null;
     if (matchedCount === 0 && opts.upsert) {
       const base: TDoc = { ...query } as TDoc;
-      const applied = applyModifier(base, modifier);
+      const applied = applyModifier(base, modifier, { inserting: true });
       if (!applied.id) applied.id = newShortId();
       updated.set(applied.id, applied);
       upsertedId = applied.id;

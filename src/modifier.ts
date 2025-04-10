@@ -9,6 +9,8 @@ export type Modifier<T> = {
   $min?: Numbers<T>;
   $max?: Numbers<T>;
   $mul?: Numbers<T>;
+  $setOnInsert?: Partial<T>;
+  $addToSet?: Arrays<T>;
 };
 
 type Numbers<T> = {
@@ -49,8 +51,19 @@ function unsetValue(obj: any, path: string): any {
   return updated;
 }
 
-export function applyModifier<TDoc extends Document>(doc: TDoc, mod: Modifier<TDoc>): TDoc {
+export function applyModifier<TDoc extends Document>(
+  doc: TDoc,
+  mod: Modifier<TDoc>,
+  ctx: { inserting?: boolean } = {}
+): TDoc {
   let updated = doc;
+  if (mod.$setOnInsert && ctx.inserting) {
+    for (const [k, v] of Object.entries(mod.$setOnInsert)) {
+      if (getValue(updated, k) === undefined) {
+        updated = setValue(updated, k, v);
+      }
+    }
+  }
 
   if (mod.$set) {
     for (const [k, v] of Object.entries(mod.$set)) {
@@ -103,6 +116,19 @@ export function applyModifier<TDoc extends Document>(doc: TDoc, mod: Modifier<TD
     for (const [k, v] of Object.entries(mod.$push)) {
       const arr = getValue(updated, k);
       updated = setValue(updated, k, Array.isArray(arr) ? [...arr, v] : [v]);
+    }
+  }
+
+  if (mod.$addToSet) {
+    for (const [k, v] of Object.entries(mod.$addToSet)) {
+      const arr = getValue(updated, k);
+      if (Array.isArray(arr)) {
+        if (!arr.includes(v)) {
+          updated = setValue(updated, k, [...arr, v]);
+        }
+      } else {
+        updated = setValue(updated, k, [v]);
+      }
     }
   }
 
