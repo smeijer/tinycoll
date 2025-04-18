@@ -8,11 +8,11 @@ export class IndexedDbStorage implements StorageAdapter {
     this.#store = createStore('tinycoll', 'tinycoll');
   }
 
-  get(key: string) {
+  async get(key: string) {
     return get(key, this.#store);
   }
 
-  set(key: string, val: any) {
+  async set(key: string, val: any) {
     return set(key, val, this.#store);
   }
 

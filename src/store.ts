@@ -2,11 +2,12 @@ import { signal, effect } from '@preact/signals-core';
 import { matches, Query } from './match.js';
 import { newShortId } from './utils.js';
 import { StorageAdapter } from './storage.js';
-import { PromiseQueue } from './promise-queue';
-import { applyModifier, Modifier } from './modifier';
+import { PromiseQueue } from './promise-queue.js';
+import { applyModifier, Modifier } from './modifier.js';
 
 type Projected<TDoc, TPrj> = keyof TPrj extends never ? TDoc : Pick<TDoc, Extract<keyof TPrj, keyof TDoc>>;
 type Projection<TDoc> = Partial<Record<keyof TDoc, 1>>;
+type Sort<TDoc> = Partial<Record<keyof TDoc, 1 | -1>>;
 
 type WithId<T = {}> = T & { id: string };
 type WithoutId<T = {}> = Omit<T, 'id'>;
@@ -14,7 +15,7 @@ type WithOptionalId<T = {}> = WithoutId<T> & { id?: string };
 
 export type Document = WithId<Record<string, any>>
 
-interface Observer {
+export interface Observer {
   id: string;
   stop: () => void;
 }
@@ -28,7 +29,7 @@ interface UpdateResult<T> {
 
 interface FindOptions<TDoc extends Document, TPrj = Projection<TDoc>> {
   projection?: TPrj;
-  sort?: Record<string, 1 | -1>;
+  sort?: Sort<TDoc>;
   skip?: number;
   limit?: number;
 }
@@ -69,7 +70,7 @@ class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
     return new ReactiveCursor(this.#queryFn, { ...this.#options, ...opts });
   }
 
-  sort(sort: Record<string, 1 | -1>): ReactiveCursor<TDoc, TOut> {
+  sort(sort: Sort<TDoc>): ReactiveCursor<TDoc, TOut> {
     return this.#clone({ sort });
   }
 
@@ -239,9 +240,9 @@ function extractMatchingDocs<TDocument extends Document>(query: Query<TDocument>
   return Array.from(map.values()).filter((doc) => matches(doc, query));
 }
 
-function sortDocs(docs: any[], sort: Record<string, 1 | -1>): any[] {
+function sortDocs<TDoc>(docs: TDoc[], sort: Sort<TDoc>): TDoc[] {
   return [...docs].sort((a, b) => {
-    for (const [key, dir] of Object.entries(sort)) {
+    for (const [key, dir] of Object.entries<any>(sort)) {
       const aVal = getValue(a, key);
       const bVal = getValue(b, key);
       if (aVal < bVal) return -1 * dir;
@@ -272,6 +273,7 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
   #docs = signal<Map<string, TDoc>>(new Map());
   #storage?: StorageAdapter;
   #ttlIndexes: TtlIndex[] = [];
+  #ttlInterval: number;
   #isBatching = false;
   #localClone = new Map<string, TDoc>();
   #meta: Meta<WithId<TMeta>> | null = null;
@@ -291,35 +293,40 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
     this.#dbKey = name;
     this.#storage = options?.storage;
     this.#ttlIndexes = options?.ttlIndexes || [];
+    this.#ttlInterval = options?.ttlInterval ?? 60_000;
 
     if (name !== '_meta') {
       this.#meta = new Meta(name, { storage: options?.storage });
     }
 
-    let _resolve: () => void;
-    this.#ready = new Promise((resolve) => {
-      _resolve = resolve;
-    })
+    this.#ready = new Promise(async (resolve) => {
+      await Promise.all([
+        this.#initStorage(),
+        this.#meta?.ready,
+      ]);
 
-    void this.#initStorage().finally(() => _resolve());
+      queueMicrotask(() => resolve());
+    });
 
-    const ttlInterval = options?.ttlInterval ?? 60_000;
-    setInterval(() => {
-      const now = Date.now();
-      const updated = new Map(this.#docs.value);
-      let changed = false;
-      for (const [id, doc] of updated) {
-        for (const index of this.#ttlIndexes) {
-          const ts = getValue(doc, index.field);
-          if (typeof ts === 'number' && now >= ts + index.expireAfterSeconds * 1000) {
-            updated.delete(id);
-            changed = true;
-            break;
-          }
+    setInterval(() => this.#processTtlIndexes(), this.#ttlInterval);
+  }
+
+  #processTtlIndexes() {
+    const now = Date.now();
+    const updated = new Map(this.#docs.value);
+    let changed = false;
+    for (const [id, doc] of updated) {
+      for (const index of this.#ttlIndexes) {
+        const ts = getValue(doc, index.field);
+        if (typeof ts === 'number' && now >= ts + index.expireAfterSeconds * 1000) {
+          updated.delete(id);
+          changed = true;
+          break;
         }
       }
-      if (changed) this.#docs.value = updated;
-    }, ttlInterval);
+    }
+
+    if (changed) this.#docs.value = updated;
   }
 
   async #initStorage() {
@@ -340,7 +347,10 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
 
   onReady(callback: () => void) {
     void this.#ready.then(callback);
-    const x = this.batch(async () => 24);
+  }
+
+  get ready() {
+    return this.#ready;
   }
 
   batch<Fn extends () => any>(fn: Fn): ReturnType<Fn> extends Promise<any> ? Promise<void> : void {
