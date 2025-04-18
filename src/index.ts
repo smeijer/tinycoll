@@ -1,2 +1,2 @@
-export { Collection } from './store.js';
+export { Collection, type Observer } from './store.js';
 
