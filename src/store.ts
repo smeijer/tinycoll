@@ -478,6 +478,26 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
   count(query: Query<TDoc> = {}) {
     return this.find(query).count();
   }
+
+  distinct<K extends keyof TDoc, TOut = TDoc[K]>(
+    key: K,
+    query: Query<TDoc> = {},
+  ) {
+    return new ReactiveCursor<TDoc, TOut>(() => {
+      const seen = new Set<TOut>();
+      const results: Array<TDoc[K]> = [];
+
+      for (const doc of extractMatchingDocs(query, this.#docs.value)) {
+        const val = doc[key];
+        if (!seen.has(val)) {
+          seen.add(val);
+          results.push(val);
+        }
+      }
+
+      return results;
+    });
+  }
 }
 
 class Meta<TMeta extends Document> extends Collection<WithId<TMeta>, {}> {
