@@ -94,7 +94,7 @@ class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
     return this.skip(skip).limit(perPage);
   }
 
-   #ensureRun() {
+  #ensureRun() {
     if (this.#hasRun) return;
     this.#hasRun = true;
 
@@ -226,6 +226,15 @@ class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
   exists(): boolean {
     return this.count() > 0;
   }
+
+  group<TGroup extends GroupExpression<TDoc>, TOut = InferGroupOutput<TDoc, TGroup>>(
+    group: TGroup
+  ): ReactiveCursor<TDoc, TOut> {
+    return new ReactiveCursor(() => {
+      this.#ensureRun();
+      return groupDocs(this.#result.value, group) as any;
+    });
+  }
 }
 
 function getValue(obj: any, path: string): any {
@@ -250,6 +259,41 @@ function sortDocs<TDoc>(docs: TDoc[], sort: Sort<TDoc>): TDoc[] {
     }
     return 0;
   });
+}
+
+function groupDocs<TDoc extends Document, TGroup extends GroupExpression<TDoc>>(
+  docs: TDoc[],
+  group: TGroup
+): Array<InferGroupOutput<TDoc, TGroup>> {
+  const { key: prop, ...rest } = group;
+
+  const grouped = new Map<any, TDoc[]>();
+  for (const doc of docs) {
+    const key = getValue(doc, prop);
+    const list = grouped.get(key) || [];
+    list.push(doc);
+    grouped.set(key, list);
+  }
+
+  const results = [];
+  for (const [key, groupDocs] of grouped.entries()) {
+    const out: Record<string, any> = { id: key };
+    for (const [field, expr] of Object.entries(rest)) {
+      if (typeof expr === 'object' && '$sum' in expr) {
+        out[field] = groupDocs.length;
+      } else if (typeof expr === 'object' && '$push' in expr) {
+        const val = expr.$push;
+        if (val === '$$ROOT') {
+          out[field] = [...groupDocs];
+        } else if (typeof val === 'string') {
+          out[field] = groupDocs.map((doc) => getValue(doc, val));
+        }
+      }
+    }
+    results.push(out);
+  }
+
+  return results as any;
 }
 
 function project<TDoc, TPrj extends Projection<TDoc>>(
@@ -498,7 +542,32 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
       return results;
     });
   }
+
 }
+
+type SumAccumulator = { $sum: 1 };
+type PushAccumulator<T extends Document> = { $push: '$$ROOT' } | { $push: keyof T };
+type GroupAccumulator<T extends Document> = SumAccumulator | PushAccumulator<T>;
+
+type GroupExpression<T extends Document> = {
+  key: Extract<keyof T, string>;
+  [key: string]: GroupAccumulator<T> | keyof T;
+};
+
+type InferGroupOutput<TDoc extends Document, TGroup extends GroupExpression<TDoc>> = {
+  [K in keyof TGroup]:
+    K extends 'key'
+      ? TGroup[K] extends keyof TDoc
+        ? TDoc[TGroup[K]]
+        : unknown
+      : TGroup[K] extends { $sum: 1 }
+        ? number
+        : TGroup[K] extends { $push: '$$ROOT' }
+          ? TDoc[]
+          : TGroup[K] extends { $push: keyof TDoc }
+            ? Array<TDoc[TGroup[K]['$push']]>
+            : never;
+};
 
 class Meta<TMeta extends Document> extends Collection<WithId<TMeta>, {}> {
   #name: string;
@@ -516,3 +585,4 @@ class Meta<TMeta extends Document> extends Collection<WithId<TMeta>, {}> {
     this.update({ id: this.#name }, { $set: { [key]: value } as any }, { upsert: true });
   }
 }
+

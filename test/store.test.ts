@@ -76,22 +76,38 @@ await test('ttl index removes expired documents', async () => {
   assert.strictEqual(ttlUsers.count(), 1);
 });
 
-// await test.skip('indexedDbStorage adapter (browser-only)', async () => {
-//   const coll = new Collection<{ id: string; name: string }>('idb-test', { storage: indexedDbStorage });
-//   coll.clear();
-//   coll.insert({ id: 'idb', name: 'Browser' });
-//   await delay(10); // allow effect to write
-//   const check = coll.findOne({ id: 'idb' });
-//   assert.strictEqual(check.value?.name, 'Browser');
-// });
-//
-// await test.skip('fileStorage adapter (Node)', async () => {
-//   const coll = new Collection<{ id: string; name: string }>('file-test', {
-//     storage: createFileStorage('./tmp-store.json'),
-//   });
-//   coll.clear();
-//   coll.insert({ id: 'file', name: 'Node' });
-//   await delay(10);
-//   const check = coll.findOne({ id: 'file' });
-//   assert.strictEqual(check.value?.name, 'Node');
-// });
+await test('distinct returns primitive array', async () => {
+  const coll = new Collection<{ id: string; country: string, population: number }>('distinct-test');
+  coll.insert({ id: 'a', country: 'NL', population: 17 });
+  coll.insert({ id: 'b', country: 'DE', population: 83 });
+  coll.insert({ id: 'c', country: 'BE', population: 11 });
+
+  const countries = coll.distinct('country').toArray();
+
+  assert.deepStrictEqual(countries, ['NL', 'DE', 'BE']);
+})
+
+await test('aggregate', () => {
+  const coll = new Collection<{ id: string; country: string, population: number }>('aggregate-test');
+
+  coll.insert({ id: 'a', country: 'NL', population: 17 });
+  coll.insert({ id: 'b', country: 'DE', population: 83 });
+  coll.insert({ id: 'c', country: 'BE', population: 11 });
+
+  const docs = coll.find({ population: { $gt: 15 } })
+    .group({ key: 'country', count: { $sum: 1 }, items: { $push: '$$ROOT' } })
+    .toArray();
+
+  assert.deepStrictEqual(docs, [
+    {
+      id: 'NL',
+      count: 1,
+      items: [{ id: 'a', country: 'NL', population: 17 }],
+    },
+    {
+      id: 'DE',
+      count: 1,
+      items: [{ id: 'b', country: 'DE', population: 83 }],
+    }
+  ]);
+});
