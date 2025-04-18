@@ -35,6 +35,8 @@ function getValue(obj: any, path: string) {
 }
 
 function matchField(val: any, cond: any): boolean {
+  // { key: undefined } and { key: { $eq: undefined } } are intentional different things
+  if (cond === undefined) return true;
   if (typeof cond !== 'object' || cond === null) return val === cond;
 
   return Object.entries<any>(cond).every(([op, expected]) => {
