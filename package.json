@@ -1,6 +1,6 @@
 {
   "name": "tinycoll",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "main": "./dist/commonjs/index.js",
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "dev": "tshy --watch"
   },
   "author": "Stephan Meijer",
-  "license": "ISC",
+  "license": "MIT",
   "description": "",
   "dependencies": {
     "@preact/signals-core": "^1.8.0",
@@ -25,6 +25,12 @@
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
   },
+  "files": [
+    "package.json",
+    "dist",
+    "indexeddb-storage",
+    "file-storage"
+  ],
   "tshy": {
     "exports": {
       "./package.json": "./package.json",
