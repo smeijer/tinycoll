@@ -20,7 +20,7 @@ jobs:
           node-version: 22.11.0
           cache: npm
       - run: npm ci
-
+      - run: npm run build
       - name: Create release PR or publish release
         uses: changesets/action@v1
         with:
