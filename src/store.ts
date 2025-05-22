@@ -235,6 +235,10 @@ class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
       return groupDocs(this.#result.value, group) as any;
     });
   }
+
+  distinct<K extends keyof TOut>(key: K): Array<TOut[K]> {
+    return [...new Set(this.toArray().map((doc) => doc[key]))] as any;
+  }
 }
 
 function getValue(obj: any, path: string): any {
@@ -522,27 +526,6 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
   count(query: Query<TDoc> = {}) {
     return this.find(query).count();
   }
-
-  distinct<K extends keyof TDoc, TOut = TDoc[K]>(
-    key: K,
-    query: Query<TDoc> = {},
-  ) {
-    return new ReactiveCursor<TDoc, TOut>(() => {
-      const seen = new Set<TOut>();
-      const results: Array<TDoc[K]> = [];
-
-      for (const doc of extractMatchingDocs(query, this.#docs.value)) {
-        const val = doc[key];
-        if (!seen.has(val)) {
-          seen.add(val);
-          results.push(val);
-        }
-      }
-
-      return results;
-    });
-  }
-
 }
 
 type SumAccumulator = { $sum: 1 };
