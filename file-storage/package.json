@@ -1,4 +1,0 @@
-{
-  "main": "../dist/commonjs/file-storage.js",
-  "types": "../dist/commonjs/file-storage.d.ts"
-}

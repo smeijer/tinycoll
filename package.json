@@ -8,7 +8,8 @@
     "test": "globstar -- node --watch --import tsx --test \"test/**.test.ts\"",
     "test:only": "globstar -- node --watch --import tsx --test-only \"test/**.test.ts\"",
     "build": "tshy",
-    "dev": "tshy --watch"
+    "dev": "tshy --watch",
+    "attw": "npx -y @arethetypeswrong/cli -P --profile node16"
   },
   "author": "Stephan Meijer",
   "license": "MIT",
