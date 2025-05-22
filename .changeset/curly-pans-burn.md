@@ -1,5 +1,0 @@
----
-"tinycoll": minor
----
-
-fix publication
