@@ -1,6 +1,6 @@
 import { signal, effect } from '@preact/signals-core';
 import { matches, Query } from './match.js';
-import { newShortId } from './utils.js';
+import { newShortId } from './id.js';
 import { StorageAdapter } from './storage.js';
 import { PromiseQueue } from './promise-queue.js';
 import { applyModifier, Modifier } from './modifier.js';
