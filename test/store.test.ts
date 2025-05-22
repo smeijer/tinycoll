@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
-import { Collection } from '../src/store';
-import { Query } from '../src/match';
+import { Collection } from '../src/collection';
+import { Query } from '../src/internal/match';
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 

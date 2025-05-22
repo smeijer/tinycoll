@@ -1,9 +1,9 @@
 import { signal, effect } from '@preact/signals-core';
-import { matches, Query } from './match.js';
-import { newShortId } from './id.js';
+import { matches, Query } from './internal/match.js';
+import { newShortId } from './utils.js';
 import { StorageAdapter } from './storage.js';
-import { PromiseQueue } from './promise-queue.js';
-import { applyModifier, Modifier } from './modifier.js';
+import { PromiseQueue } from './internal/promise-queue.js';
+import { applyModifier, Modifier } from './internal/modifier.js';
 
 type Projected<TDoc, TPrj> = keyof TPrj extends never ? TDoc : Pick<TDoc, Extract<keyof TPrj, keyof TDoc>>;
 type Projection<TDoc> = Partial<Record<keyof TDoc, 1>>;
@@ -48,7 +48,7 @@ interface Change<T> {
   doc: T;
 }
 
-class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
+class Cursor<TDoc extends Document, TOut = TDoc> {
   #result = signal<Array<TDoc>>([]);
   #hasRun = false;
   #changeHandlers = new Set<(change: Change<TDoc>) => void>();
@@ -66,30 +66,30 @@ class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
     this.#options = options;
   }
 
-  #clone(opts: Partial<FindOptions<TDoc>>): ReactiveCursor<TDoc, TOut> {
-    return new ReactiveCursor(this.#queryFn, { ...this.#options, ...opts });
+  #clone(opts: Partial<FindOptions<TDoc>>): Cursor<TDoc, TOut> {
+    return new Cursor(this.#queryFn, { ...this.#options, ...opts });
   }
 
-  sort(sort: Sort<TDoc>): ReactiveCursor<TDoc, TOut> {
+  sort(sort: Sort<TDoc>): Cursor<TDoc, TOut> {
     return this.#clone({ sort });
   }
 
-  limit(limit: number): ReactiveCursor<TDoc, TOut> {
+  limit(limit: number): Cursor<TDoc, TOut> {
     return this.#clone({ limit });
   }
 
-  skip(skip: number): ReactiveCursor<TDoc, TOut> {
+  skip(skip: number): Cursor<TDoc, TOut> {
     return this.#clone({ skip });
   }
 
   project<
     TProjection = Projection<TDoc>,
-    TOut = ReactiveCursor<TDoc, Projected<TDoc, TProjection>>
+    TOut = Cursor<TDoc, Projected<TDoc, TProjection>>
   >(projection: TProjection): TOut {
     return this.#clone({ projection: projection as any }) as TOut;
   }
 
-  paginate(page: number, perPage: number): ReactiveCursor<TDoc, TOut> {
+  paginate(page: number, perPage: number): Cursor<TDoc, TOut> {
     const skip = (page - 1) * perPage;
     return this.skip(skip).limit(perPage);
   }
@@ -227,10 +227,10 @@ class ReactiveCursor<TDoc extends Document, TOut = TDoc> {
     return this.count() > 0;
   }
 
-  group<TGroup extends GroupExpression<TDoc>, TOut = InferGroupOutput<TDoc, TGroup>>(
+  group<TGroup extends GroupExpression<TDoc>, TOut = GroupResult<TDoc, TGroup>>(
     group: TGroup
-  ): ReactiveCursor<TDoc, TOut> {
-    return new ReactiveCursor(() => {
+  ): Cursor<TDoc, TOut> {
+    return new Cursor(() => {
       this.#ensureRun();
       return groupDocs(this.#result.value, group) as any;
     });
@@ -268,7 +268,7 @@ function sortDocs<TDoc>(docs: TDoc[], sort: Sort<TDoc>): TDoc[] {
 function groupDocs<TDoc extends Document, TGroup extends GroupExpression<TDoc>>(
   docs: TDoc[],
   group: TGroup
-): Array<InferGroupOutput<TDoc, TGroup>> {
+): Array<GroupResult<TDoc, TGroup>> {
   const { key: prop, ...rest } = group;
 
   const grouped = new Map<any, TDoc[]>();
@@ -513,7 +513,7 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
     query: Query<TDoc> = {},
     opts: FindOptions<TDoc, TPrj> = {}
   ) {
-    return new ReactiveCursor<TDoc, TOut>(() => extractMatchingDocs(query, this.#docs.value), opts);
+    return new Cursor<TDoc, TOut>(() => extractMatchingDocs(query, this.#docs.value), opts);
   }
 
   findOne<TPrj extends Projection<TDoc> = {}, TOut = Projected<TDoc, TPrj>>(
@@ -537,7 +537,7 @@ type GroupExpression<T extends Document> = {
   [key: string]: GroupAccumulator<T> | keyof T;
 };
 
-type InferGroupOutput<TDoc extends Document, TGroup extends GroupExpression<TDoc>> = {
+type GroupResult<TDoc extends Document, TGroup extends GroupExpression<TDoc>> = {
   [K in keyof TGroup]:
     K extends 'key'
       ? TGroup[K] extends keyof TDoc

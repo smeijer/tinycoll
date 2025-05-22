@@ -1,4 +1,4 @@
-import { Document } from './store.js';
+import { Document } from '../collection.js';
 
 export type Modifier<T> = {
   $set?: Partial<T>;

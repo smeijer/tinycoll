@@ -32,15 +32,19 @@
     "file-storage"
   ],
   "tshy": {
-    "exports": {
-      "./package.json": "./package.json",
-      "./file-storage": "./src/file-storage.ts",
-      "./indexeddb-storage": "./src/indexeddb-storage.ts",
-      ".": "./src/index.ts"
-    }
+    "exports": "src/*.ts"
   },
   "exports": {
-    "./package.json": "./package.json",
+    "./collection": {
+      "import": {
+        "types": "./dist/esm/collection.d.ts",
+        "default": "./dist/esm/collection.js"
+      },
+      "require": {
+        "types": "./dist/commonjs/collection.d.ts",
+        "default": "./dist/commonjs/collection.js"
+      }
+    },
     "./file-storage": {
       "import": {
         "types": "./dist/esm/file-storage.d.ts",
@@ -49,6 +53,16 @@
       "require": {
         "types": "./dist/commonjs/file-storage.d.ts",
         "default": "./dist/commonjs/file-storage.js"
+      }
+    },
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/commonjs/index.d.ts",
+        "default": "./dist/commonjs/index.js"
       }
     },
     "./indexeddb-storage": {
@@ -61,16 +75,27 @@
         "default": "./dist/commonjs/indexeddb-storage.js"
       }
     },
-    ".": {
+    "./storage": {
       "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
+        "types": "./dist/esm/storage.d.ts",
+        "default": "./dist/esm/storage.js"
       },
       "require": {
-        "types": "./dist/commonjs/index.d.ts",
-        "default": "./dist/commonjs/index.js"
+        "types": "./dist/commonjs/storage.d.ts",
+        "default": "./dist/commonjs/storage.js"
       }
-    }
+    },
+    "./utils": {
+      "import": {
+        "types": "./dist/esm/utils.d.ts",
+        "default": "./dist/esm/utils.js"
+      },
+      "require": {
+        "types": "./dist/commonjs/utils.d.ts",
+        "default": "./dist/commonjs/utils.js"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "types": "./dist/commonjs/index.d.ts",
   "module": "./dist/esm/index.js"
