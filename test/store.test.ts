@@ -6,17 +6,16 @@ import { Query } from '../src/match';
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 await test('insert, findOne, and watchById', () => {
-  const users = new Collection<{ id: string; name: string; nationality: string }>('test-users');
+  const users = new Collection<{ id: string; name: string; nationality: string }>('test_users');
   users.remove({});
   users.insert({ id: 'abc', name: 'Stephan', nationality: 'Dutch' });
-
 
   const found = users.findOne({ id: 'abc' });
   assert.strictEqual(found?.name, 'Stephan');
 });
 
 await test('query with $gt, $in, $and', () => {
-  const users = new Collection<{ id: string; age: number }>('query-users');
+  const users = new Collection<{ id: string; age: number }>('query_users');
   users.remove({});
   users.insert({ id: '1', age: 30 });
   users.insert({ id: '2', age: 40 });
@@ -30,7 +29,7 @@ await test('query with $gt, $in, $and', () => {
 });
 
 await test('update, remove, and batch', () => {
-  const users = new Collection<{ id: string; value: number }>('batch-users');
+  const users = new Collection<{ id: string; value: number }>('batch_users');
   users.remove({});
 
   users.batch(() => {
@@ -47,7 +46,7 @@ await test('update, remove, and batch', () => {
 });
 
 await test('reactive count and find', () => {
-  const users = new Collection<{ id: string; x?: number; y?: number }>('reactive-users');
+  const users = new Collection<{ id: string; x?: number; y?: number }>('reactive_users');
   users.remove({});
   const all = users.find({});
 
@@ -62,7 +61,7 @@ await test('reactive count and find', () => {
 
 await test('ttl index removes expired documents', async () => {
   const now = Date.now();
-  const ttlUsers = new Collection<{ id: string; expiresAt: number }>('ttl-users', {
+  const ttlUsers = new Collection<{ id: string; expiresAt: number }>('ttl_users', {
     ttlIndexes: [{ field: 'expiresAt', expireAfterSeconds: 0 }],
     ttlInterval: 50,
   });
@@ -77,18 +76,17 @@ await test('ttl index removes expired documents', async () => {
 });
 
 await test('distinct returns primitive array', async () => {
-  const coll = new Collection<{ id: string; country: string, population: number }>('distinct-test');
+  const coll = new Collection<{ id: string; country: string, population: number }>('distinct_test');
   coll.insert({ id: 'a', country: 'NL', population: 17 });
   coll.insert({ id: 'b', country: 'DE', population: 83 });
   coll.insert({ id: 'c', country: 'BE', population: 11 });
 
-  const countries = coll.distinct('country').toArray();
-
+  const countries = coll.find({}).distinct('country');
   assert.deepStrictEqual(countries, ['NL', 'DE', 'BE']);
 })
 
 await test('aggregate', () => {
-  const coll = new Collection<{ id: string; country: string, population: number }>('aggregate-test');
+  const coll = new Collection<{ id: string; country: string, population: number }>('aggregate_test');
 
   coll.insert({ id: 'a', country: 'NL', population: 17 });
   coll.insert({ id: 'b', country: 'DE', population: 83 });
