@@ -12,7 +12,7 @@
   },
   "author": "Stephan Meijer",
   "license": "MIT",
-  "description": "",
+  "description": "A minimal reactive document store with Mongo-like querying, reactivity, TTL support, and optional persistence.",
   "dependencies": {
     "@preact/signals-core": "^1.8.0",
     "idb-keyval": "^6.2.1"
