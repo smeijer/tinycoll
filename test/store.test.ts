@@ -1,7 +1,6 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 import { Collection } from '../src/collection';
-import { Query } from '../src/internal/match';
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
@@ -73,6 +72,7 @@ await test('ttl index removes expired documents', async () => {
   assert.strictEqual(ttlUsers.count(), 2);
   await delay(100);
   assert.strictEqual(ttlUsers.count(), 1);
+  ttlUsers.dispose();
 });
 
 await test('distinct returns primitive array', async () => {

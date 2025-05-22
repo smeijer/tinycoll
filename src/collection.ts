@@ -327,6 +327,7 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
   #meta: Meta<WithId<TMeta>> | null = null;
   #ready: Promise<void>;
   #txQueue = new PromiseQueue();
+  #ttlIntervalId?: NodeJS.Timeout;
 
   get meta(): Meta<WithId<TMeta>> {
     if (!this.#meta) throw new Error('Collection is not initialized');
@@ -356,7 +357,13 @@ export class Collection<TDoc extends Document, TMeta extends WithoutId<Document>
       queueMicrotask(() => resolve());
     });
 
-    setInterval(() => this.#processTtlIndexes(), this.#ttlInterval);
+    if (this.#ttlIndexes.length > 0) {
+      this.#ttlIntervalId = setInterval(() => this.#processTtlIndexes(), this.#ttlInterval);
+    }
+  }
+
+  dispose() {
+    clearInterval(this.#ttlIntervalId);
   }
 
   #processTtlIndexes() {
