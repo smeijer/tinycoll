@@ -1,5 +1,11 @@
 # tinycoll
 
+## 1.2.0
+
+### Minor Changes
+
+- [`c6e910e`](https://github.com/smeijer/tinycoll/commit/c6e910e3bb91c8513ef55cdc4ddabade8b931c53) Thanks [@smeijer](https://github.com/smeijer)! - fix publication
+
 ## 1.1.0
 
 ### Minor Changes
