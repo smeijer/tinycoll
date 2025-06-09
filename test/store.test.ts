@@ -1,6 +1,7 @@
 import assert from 'node:assert';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import { Collection } from '../src/collection';
+import { setImmediate } from 'node:timers/promises';
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
@@ -109,3 +110,60 @@ await test('aggregate', () => {
     }
   ]);
 });
+
+await test('watch runs on item mutations', async () => {
+  const coll = new Collection<{ id: string; country: string; population: number }>('watch_test');
+  coll.insert({ id: 'a', country: 'NL', population: 17 });
+  coll.insert({ id: 'b', country: 'DE', population: 83 });
+  coll.insert({ id: 'c', country: 'BE', population: 11 });
+
+  const spy = mock.fn();
+  coll.find({}).watch(spy);
+
+  await setImmediate()
+  assert(spy.mock.calls.length === 1);
+
+  coll.update({ id: 'a' }, { $set: { population: 18 } });
+
+  await setImmediate();
+  // @ts-ignore
+  assert(spy.mock.calls.length === 2);
+});
+
+await test('watch runs on item insertions', async () => {
+  const coll = new Collection<{ id: string; country: string; population: number }>('watch_test');
+  coll.insert({ id: 'a', country: 'NL', population: 17 });
+  coll.insert({ id: 'b', country: 'DE', population: 83 });
+
+  const spy = mock.fn();
+  coll.find({}).watch(spy);
+
+  await setImmediate();
+  assert(spy.mock.calls.length === 1);
+
+  coll.insert({ id: 'c', country: 'BE', population: 11 });
+
+  await setImmediate();
+  // @ts-ignore
+  assert(spy.mock.calls.length === 2);
+})
+
+
+await test('watch runs on item deletion', async () => {
+  const coll = new Collection<{ id: string; country: string; population: number }>('watch_test');
+  coll.insert({ id: 'a', country: 'NL', population: 17 });
+  coll.insert({ id: 'b', country: 'DE', population: 83 });
+  coll.insert({ id: 'c', country: 'BE', population: 11 });
+
+  const spy = mock.fn();
+  coll.find({}).watch(spy);
+
+  await setImmediate();
+    assert(spy.mock.calls.length === 1);
+
+  coll.remove({ id: 'a' });
+
+  await setImmediate();
+  // @ts-ignore
+  assert(spy.mock.calls.length === 2);
+})
