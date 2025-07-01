@@ -1,6 +1,6 @@
 {
   "name": "tinycoll",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "main": "./dist/commonjs/index.js",
   "type": "module",
   "scripts": {
@@ -15,7 +15,14 @@
   "author": "Stephan Meijer",
   "license": "MIT",
   "description": "A minimal reactive document store with Mongo-like querying, reactivity, TTL support, and optional persistence.",
-  "keywords": ["sync engine", "local-first", "signals", "reactive", "state", "data"],
+  "keywords": [
+    "sync engine",
+    "local-first",
+    "signals",
+    "reactive",
+    "state",
+    "data"
+  ],
   "dependencies": {
     "@preact/signals-core": "^1.8.0",
     "idb-keyval": "^6.2.1"
