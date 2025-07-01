@@ -165,15 +165,16 @@ class Cursor<TDoc extends Document, TOut = TDoc> {
   }
 
   watch(callback: (results: TOut[]) => void, options: { immediate?: boolean } = {}): Observer {
-    let last: TOut[] = [];
+    let last: TOut[] | undefined;
     let scheduled = false;
 
     const run = () => {
       scheduled = false;
       const next = this.toArray();
       if (
+        last === undefined ||
         next.length !== last.length ||
-        next.some((v, i) => v !== last[i])
+        next.some((v, i) => v !== last![i])
       ) {
         last = next;
         callback(next);
