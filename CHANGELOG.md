@@ -1,5 +1,11 @@
 # tinycoll
 
+## 1.3.0
+
+### Minor Changes
+
+- [`aceaf43`](https://github.com/smeijer/tinycoll/commit/aceaf433d885e6fb1df0abdd88defa5f354b3865) Thanks [@smeijer](https://github.com/smeijer)! - run `watch` on initial call
+
 ## 1.2.0
 
 ### Minor Changes
